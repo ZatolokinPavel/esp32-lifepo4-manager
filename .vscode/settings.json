@@ -1,0 +1,7 @@
+{
+    "cSpell.enabled": true,
+    "cSpell.language": "en,uk,ru",
+    "cSpell.words": [],
+    // Показывать только название проекта в заголовке окна (для удобства в MacOS Mission Control)
+    "window.title": "${rootName}"
+}

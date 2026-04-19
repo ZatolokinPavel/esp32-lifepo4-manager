@@ -12,3 +12,13 @@ This project provides a monitoring and control solution for the **MUST PV18-3224
 * **BMS:** JK-B2A8S20P-HDC (2A Active Balance, 200A, Smart BMS, Firmware: v19.20)
 * **MCU:** ESP32 (WT32-ETH01 V1.4)
 * **Interface:** TTL-to-RS485 modules
+
+
+### Initial installation of dependencies:
+Install python: `sudo apt-get install python` or `brew install python`  
+`brew install pipx`  
+Install PlatformIO: `pipx install platformio`  
+
+First compilation: `pio run`  
+First flashing via UART: `pio run -t upload`  
+Debug via UART: `pio device monitor`
