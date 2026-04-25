@@ -1,6 +1,9 @@
 # PlatformIO
 .pio/
 
+# Clangd cache
+.cache/
+
 # Prerequisites
 *.d
 
