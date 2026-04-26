@@ -13,6 +13,9 @@ This project provides a monitoring and control solution for the **MUST PV18-3224
 * **MCU:** ESP32 (WT32-ETH01 V1.4)
 * **Interface:** TTL-to-RS485 modules
 
+### Protocols:
+* JK-BMS RS485 Modbus V1.1 Register Map: [PDF](protocols/BMS%20RS485%20Modbus%20V1.1%20Register%20Map%20(for%20PB2A16S20P).pdf) (source: [esphome-jk-bms/docs](https://github.com/syssi/esphome-jk-bms/tree/main/docs/pb2a16s20p))
+
 
 ### Initial installation of dependencies:
 Install python: `sudo apt-get install python` or `brew install python`  
