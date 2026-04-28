@@ -2,3 +2,6 @@
 
 upload:
 	pio run -t upload
+
+debug:
+	pio device monitor

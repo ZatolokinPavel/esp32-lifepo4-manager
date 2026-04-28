@@ -3,6 +3,7 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include "bms.h"
 
 // ── Pin Definitions ──────────────────────────────────────────────
 // OTA protection switch on GPIO35 (input-only pin).
@@ -19,15 +20,29 @@ static constexpr uint8_t PIN_BMS_RX  = 5;   // RXD on board
 static constexpr uint8_t PIN_INV_TX  = 33;
 static constexpr uint8_t PIN_INV_RX  = 32;
 
-// ── Globals ──────────────────────────────────────────────────────
-WebServer server(80);
-static bool ethConnected = false;
+// ── Shared data (аналог ets) ─────────────────────────────────────
+struct DeviceData {
+    // BMS
+    BMSData  bms;
 
-// UART for RS485 devices (baud rates are placeholders — will set actual values with protocols)
+    // Inverter
+    float    invVoltageIn;
+    float    invVoltageOut;
+    float    invLoadPercent;
+    bool     invOnline;
+    uint32_t lastInvUpdate;
+};
+
+static DeviceData   deviceData = {};
+static SemaphoreHandle_t dataMutex;
+
+// ── UART ports for RS485 devices ─────────────────────────────────
 HardwareSerial SerialBMS(1);   // UART1
 HardwareSerial SerialINV(2);   // UART2
 
-// ── Ethernet event handler ───────────────────────────────────────
+// ── Ethernet ─────────────────────────────────────────────────────
+static bool ethConnected = false;
+
 void onEthEvent(WiFiEvent_t event) {
     switch (event) {
         case ARDUINO_EVENT_ETH_START:
@@ -57,8 +72,51 @@ void onEthEvent(WiFiEvent_t event) {
 }
 
 // ── HTTP Handlers ────────────────────────────────────────────────
-void handleTest() {
-    server.send(200, "application/json", "{\"status\":\"ok\",\"device\":\"esp32-energy\"}");
+WebServer server(80);
+
+void handleStatus() {
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    DeviceData snapshot = deviceData;
+    xSemaphoreGive(dataMutex);
+
+    const BMSData& b = snapshot.bms;
+
+    char json[512];
+    snprintf(json, sizeof(json),
+        "{\"bms\":{\"online\":%s,\"soc\":%u,\"current\":%d,\"power\":%u,"
+        "\"cap_remain\":%u,\"cap_nominal\":%u,"
+        "\"charge_mos\":%s,\"discharge_mos\":%s,"
+        "\"cells\":[%u,%u,%u,%u,%u,%u,%u,%u]},"
+        "\"inverter\":{\"online\":%s,\"voltage_in\":%.1f,\"voltage_out\":%.1f,\"load\":%.1f}}",
+        b.online ? "true" : "false",
+        b.soc, b.current, b.power,
+        b.capRemain, b.capNominal,
+        b.chargeMOS ? "true" : "false",
+        b.dischargeMOS ? "true" : "false",
+        b.cellVoltage[0], b.cellVoltage[1], b.cellVoltage[2], b.cellVoltage[3],
+        b.cellVoltage[4], b.cellVoltage[5], b.cellVoltage[6], b.cellVoltage[7],
+        snapshot.invOnline ? "true" : "false",
+        snapshot.invVoltageIn, snapshot.invVoltageOut, snapshot.invLoadPercent);
+
+    server.send(200, "application/json", json);
+}
+
+void handleMode() {
+    // TODO: parse body and change inverter mode
+    server.send(200, "application/json", "{\"status\":\"not_implemented\"}");
+}
+
+void handleSystem() {
+    char json[128];
+    snprintf(json, sizeof(json),
+        "{\"uptime_sec\":%lu,\"free_heap\":%u}",
+        millis() / 1000, ESP.getFreeHeap());
+    server.send(200, "application/json", json);
+}
+
+void handleReboot() {
+    // TODO: implement with rate-limiting / auth protection
+    server.send(200, "application/json", "{\"status\":\"not_implemented\"}");
 }
 
 void handleNotFound() {
@@ -74,32 +132,15 @@ bool isOtaAllowed() {
 
 void startOTA() {
     if (otaRunning) return;
-
     ArduinoOTA.setHostname("esp32-energy");
-
-    ArduinoOTA.onStart([]() {
-        Serial.println("[OTA] Update starting...");
-    });
-
-    ArduinoOTA.onEnd([]() {
-        Serial.println("\n[OTA] Update complete!");
-    });
-
+    ArduinoOTA.onStart([]() { Serial.println("[OTA] Update starting..."); });
+    ArduinoOTA.onEnd([]()   { Serial.println("\n[OTA] Update complete!"); });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
         Serial.printf("[OTA] Progress: %u%%\r", (progress * 100) / total);
     });
-
     ArduinoOTA.onError([](ota_error_t error) {
-        Serial.printf("[OTA] Error[%u]: ", error);
-        switch (error) {
-            case OTA_AUTH_ERROR:    Serial.println("Auth Failed");    break;
-            case OTA_BEGIN_ERROR:   Serial.println("Begin Failed");   break;
-            case OTA_CONNECT_ERROR: Serial.println("Connect Failed"); break;
-            case OTA_RECEIVE_ERROR: Serial.println("Receive Failed"); break;
-            case OTA_END_ERROR:     Serial.println("End Failed");     break;
-        }
+        Serial.printf("[OTA] Error[%u]\n", error);
     });
-
     ArduinoOTA.begin();
     otaRunning = true;
     Serial.println("[OTA] Enabled (switch ON)");
@@ -112,8 +153,48 @@ void stopOTA() {
     Serial.println("[OTA] Disabled (switch OFF)");
 }
 
+// ═════════════════════════════════════════════════════════════════
+// Task 1: RS485 polling (runs on core 0)
+// ═════════════════════════════════════════════════════════════════
 
-// ── Setup ────────────────────────────────────────────────────────
+void pollBMS() {
+    BMSData bms = readBmsStatus(SerialBMS);
+
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    deviceData.bms = bms;
+    xSemaphoreGive(dataMutex);
+
+    if (bms.online) {
+        Serial.printf("[BMS] SOC=%u%% I=%dmA P=%umW\n", bms.soc, bms.current, bms.power);
+    }
+}
+
+void pollInverter() {
+    // TODO: send actual Modbus request and parse response
+    // For now — stub with dummy data
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    deviceData.invVoltageIn  = 230.5;
+    deviceData.invVoltageOut = 220.1;
+    deviceData.invLoadPercent = 42.0;
+    deviceData.invOnline     = false;
+    deviceData.lastInvUpdate = millis();
+    xSemaphoreGive(dataMutex);
+}
+
+void rs485Task(void* param) {
+    Serial.println("[RS485] Task started on core " + String(xPortGetCoreID()));
+    for (;;) {
+        pollBMS();
+        delay(100);       // small gap between devices
+        pollInverter();
+        delay(1000);      // poll cycle ~1 second
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Task 2: HTTP + OTA (runs on core 1, same as Arduino loop)
+// ═════════════════════════════════════════════════════════════════
+
 void setup() {
     Serial.begin(115200);
     Serial.println("\n[BOOT] ESP32 Energy Controller starting...");
@@ -126,19 +207,24 @@ void setup() {
     // OTA protection pin (external 10k pull-up, no internal pull available on GPIO35)
     pinMode(PIN_OTA_PROTECT, INPUT);
 
-    // RS485 UARTs (baud rates TBD — using 9600 as safe default)
+    // RS485 UARTs
     SerialBMS.begin(9600, SERIAL_8N1, PIN_BMS_RX, PIN_BMS_TX);
     Serial.println("[UART1] BMS ready (GPIO5 RX, GPIO17 TX)");
-
     SerialINV.begin(9600, SERIAL_8N1, PIN_INV_RX, PIN_INV_TX);
     Serial.println("[UART2] Inverter ready (GPIO32 RX, GPIO33 TX)");
+
+    // Shared data mutex
+    dataMutex = xSemaphoreCreateMutex();
 
     // Ethernet
     WiFi.onEvent(onEthEvent);
     ETH.begin();
 
     // HTTP server
-    server.on("/test", HTTP_GET, handleTest);
+    server.on("/api/v1/status", HTTP_GET, handleStatus);
+    server.on("/api/v1/mode",   HTTP_POST, handleMode);
+    server.on("/api/v1/system", HTTP_GET, handleSystem);
+    server.on("/api/v1/reboot", HTTP_POST, handleReboot);
     server.onNotFound(handleNotFound);
     server.begin();
     Serial.println("[HTTP] Server started on port 80");
@@ -149,6 +235,9 @@ void setup() {
     } else {
         Serial.println("[OTA] Disabled (switch OFF)");
     }
+
+    // Start RS485 polling task on core 0 (network runs on core 1)
+    xTaskCreatePinnedToCore(rs485Task, "rs485", 8192, NULL, 1, NULL, 0);
 }
 
 // ── Loop ─────────────────────────────────────────────────────────
