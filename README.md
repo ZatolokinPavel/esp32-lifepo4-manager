@@ -69,3 +69,25 @@ The BMS responds with a 300-byte data array followed by a standard Modbus write 
    ```
    04 10 16 20 00 01 [CRC_Lo] [CRC_Hi]
    ```
+
+**Modifying BMS parameters:**
+
+Parameters are written using standard Modbus Write Multiple Registers (function `0x10`). The register address is `base + offset` as described above. All RW registers in the [register map](protocols/BMS%20RS485%20Modbus%20V1.1%20Register%20Map%20(for%20PB2A16S20P).pdf) can be modified this way. No authentication is required.
+
+Example — enable balancing (BalanEN at `0x1078`, UINT32, value `1`):
+```
+04 10 10 78 00 02 04 00 00 00 01 E8 E1
+```
+Response: `04 10 10 78 00 02 C5 44`
+
+Example — disable balancing (same register, value `0`):
+```
+04 10 10 78 00 02 04 00 00 00 00 29 21
+```
+Response: `04 10 10 78 00 02 C5 44`
+
+**Password register (undocumented):**  
+The BMS password is stored in plaintext at register `0x1470` (area `0x1400`, offset `0x0070`), 12 bytes, ASCII, zero-padded. This register is not listed in the official register map PDF.  
+Example — set password to "123456":  
+`04 10 14 70 00 06 0C 31 32 33 34 35 36 00 00 00 00 00 00 [CRC_Lo] [CRC_Hi]`  
+The password is a UI-level lock only — the BMS does not require authentication for register writes over RS485. Any device on the bus can read/write settings directly via standard Modbus commands.
