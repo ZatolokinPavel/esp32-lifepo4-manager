@@ -55,7 +55,7 @@ Writing value `00 00` to a special "trigger" register causes the BMS to dump an 
 | `0x161E` | `01` | `0x1000` | Settings/Parameters (voltages, currents, temperatures, switches) |
 | `0x1620` | `02` | `0x1200` | Realtime Data (cell voltages, current, temperatures, SOC, alarms) |
 | `0x161C` | `03` | `0x1400` | Device Info (model, HW/SW versions, serial numbers, protocol config) |
-| `0x1624` | `05` | undocumented | System Log (event history: charge on/off, etc.) |
+| `0x1624` | `05` | undocumented | System Log (compact event history with BMS uptime timestamps) |
 | `0x1622` | `06` | undocumented | Detail Log (full event history with BMS state snapshots) |
 
 Example — read realtime data via `0x1620`:
@@ -87,6 +87,45 @@ Example — disable balancing (same register, value `0`):
 04 10 10 78 00 02 04 00 00 00 00 29 21
 ```
 Response: `04 10 10 78 00 02 C5 44`
+
+**System Log (trigger register `0x1624`, response type `0x05`):**
+
+Writing `00 00` to register `0x1624` triggers a single 300-byte response containing a compact event history. This is the data shown in the "Logging" tab of the JK-BMS-MONITOR application, displayed as `Before [XD YH ZM WS] - [event]`.
+
+Request:
+```
+04 10 16 24 00 01 02 00 00 [CRC_Lo] [CRC_Hi]
+```
+
+Response: a single 300-byte data packet followed by a Modbus write confirmation.
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0–3 | 4 | Header | `55 AA EB 90` |
+| 4 | 1 | Response Type | `0x05` |
+| 5 | 1 | (zero) | Always `0x00` |
+| 6–10 | 5 | Metadata | First 5-byte slot — purpose unclear (observed: `35 01 00 00 08`) |
+| 11–260 | 250 | Log Entries | Up to 50 entries × 5 bytes each, stored as a **circular buffer** |
+| 261–298 | 38 | Padding | Zero-filled |
+| 299 | 1 | Checksum | Sum of bytes 0–298, mod 256 |
+
+After the data packet, the standard Modbus confirmation follows:
+```
+04 10 16 24 00 01 [CRC_Lo] [CRC_Hi]
+```
+
+**Log entry structure (5 bytes, little-endian):**
+
+| Offset | Size | Type | Field | Description |
+|--------|------|------|-------|-------------|
+| 0–3 | 4 | UINT32 | BMS Uptime | Seconds since BMS power-on (not wall-clock time) |
+| 4 | 1 | UINT8 | Event Type | Same event type codes as Detail Log (see table below) |
+
+The entries are stored in a **circular buffer** — when the buffer is full, the oldest entries are overwritten. To read entries in chronological order, find the wrap-around point (where the uptime value jumps down) and read from there.
+
+The JK-BMS-MONITOR application displays each entry as `Before [XD YH ZM WS]`, computed as `current_uptime − entry_uptime`. The current BMS uptime can be derived from any entry: `current_uptime = entry_uptime + displayed_before_duration`.
+
+> **Note:** Unlike the Detail Log (type `0x06`) which uses absolute wall-clock timestamps (epoch 2020-01-01), the System Log uses **relative BMS uptime** — seconds since the BMS was powered on. This means the timestamps lose meaning after a power cycle.
 
 **Detail Log (trigger register `0x1622`, response type `0x06`):**
 
