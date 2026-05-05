@@ -5,10 +5,6 @@ struct BMSData {
     bool     online;
     uint32_t timestamp;       // millis() of last successful read
 
-    // Cell voltages (mV)
-    uint16_t cellVoltage[8];
-    uint8_t  cellCount;
-
     // Pack
     int32_t  current;         // mA, signed (negative = discharging), ток батареи, Current
     uint32_t power;           // mW, мощность, передаваемая в/из батареи, Battery Power
@@ -22,5 +18,5 @@ struct BMSData {
 };
 
 /// Poll BMS over RS485 and return parsed data.
-/// Uses jk_bms_message internally (address=4, function=0x10).
+/// Uses modbus_message internally (address=4, function=0x03 Read Holding Registers).
 BMSData readBmsStatus(HardwareSerial& port);

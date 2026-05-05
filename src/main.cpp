@@ -85,16 +85,13 @@ void handleStatus() {
     snprintf(json, sizeof(json),
         "{\"bms\":{\"online\":%s,\"soc\":%u,\"current\":%d,\"power\":%u,"
         "\"cap_remain\":%u,\"cap_nominal\":%u,"
-        "\"charge_mos\":%s,\"discharge_mos\":%s,"
-        "\"cells\":[%u,%u,%u,%u,%u,%u,%u,%u]},"
+        "\"charge_mos\":%s,\"discharge_mos\":%s},"
         "\"inverter\":{\"online\":%s,\"voltage_in\":%.1f,\"voltage_out\":%.1f,\"load\":%.1f}}",
         b.online ? "true" : "false",
         b.soc, b.current, b.power,
         b.capRemain, b.capNominal,
         b.chargeMOS ? "true" : "false",
         b.dischargeMOS ? "true" : "false",
-        b.cellVoltage[0], b.cellVoltage[1], b.cellVoltage[2], b.cellVoltage[3],
-        b.cellVoltage[4], b.cellVoltage[5], b.cellVoltage[6], b.cellVoltage[7],
         snapshot.invOnline ? "true" : "false",
         snapshot.invVoltageIn, snapshot.invVoltageOut, snapshot.invLoadPercent);
 

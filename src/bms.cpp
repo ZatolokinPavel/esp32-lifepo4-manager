@@ -2,17 +2,23 @@
 #include "rs485.h"
 
 // Forward declarations
-static bool parseDataPacket(const uint8_t* pkt, BMSData& out);
+static bool parseRegisters(const uint8_t* payload, size_t len, BMSData& out);
 
 // JK-BMS RS485 address
-static constexpr uint8_t BMS_ADDRESS  = 4;
-static constexpr uint8_t BMS_FUNCTION = 0x10;
+static constexpr uint8_t BMS_ADDRESS = 4;
 
-// Expected confirmation in Modbus response
-static const uint8_t EXPECTED_CONF[] = {0x16, 0x20, 0x00, 0x01};
-
-// Data packet header: 55 AA EB 90
-static constexpr uint8_t JK_HEADER[] = {0x55, 0xAA, 0xEB, 0x90};
+// Read Holding Registers from block 0x1200.
+// Modbus register address = 0x1200 + doc_hex_offset.
+//
+// Doc offset 0x0090 (144) BatVolt          → reg 0x1290
+// Doc offset 0x0094 (148) BatWatt          → reg 0x1294
+// Doc offset 0x0098 (152) BatCurrent       → reg 0x1298
+// Doc offset 0x00A6 (166) BalanSta + SOC   → reg 0x12A6
+// Doc offset 0x00A8 (168) SOCCapRemain     → reg 0x12A8
+// Doc offset 0x00AC (172) SOCFullChargeCap → reg 0x12AC
+// Doc offset 0x00C0 (192) Charge+Discharge → reg 0x12C0
+//
+// We read from 0x1290 to 0x12B0 (not inclusive) = 0x20 (32) registers.
 
 // ── Public API ───────────────────────────────────────────────────
 
@@ -20,37 +26,36 @@ BMSData readBmsStatus(HardwareSerial& port) {
     BMSData data = {};
     data.online = false;
 
-    // Request: write register 0x1620, 1 register, 2 bytes, value 0x0000
+    // Modbus function 0x03 — Read Holding Registers
+    // Data: [start_reg_hi, start_reg_lo, count_hi, count_lo]
     uint8_t request[] = {
-        0x16, 0x20,       // starting address
-        0x00, 0x01,       // quantity of registers
-        0x02,                 // byte count
-        0x00, 0x00        // register value
+        0x12, 0x90, // starting address
+        0x00, 0x20  // quantity of registers 32 = 0x20 = 0x12B0 - 0x1290
     };
 
-    RS485Result res = jk_bms_message(port, BMS_ADDRESS, BMS_FUNCTION,
-                                     request, sizeof(request));
+    RS485Result res =
+        modbus_message(port, BMS_ADDRESS, 0x03, request, sizeof(request));
 
     if (!res.ok()) {
         Serial.printf("[BMS] Error: %d\n", (int)res.error);
         return data;
     }
 
-    // Verify Modbus confirmation
-    if (res.dataLen < sizeof(EXPECTED_CONF) ||
-        memcmp(res.data, EXPECTED_CONF, sizeof(EXPECTED_CONF)) != 0) {
-        Serial.println("[BMS] Unexpected confirmation");
+    // Response payload from modbus_message: [byte_count, data...]
+    if (res.dataLen < 1) {
+        Serial.println("[BMS] Empty response");
         return data;
     }
 
-    // Parse 300-byte data packet
-    if (!res.hasDataPacket) {
-        Serial.println("[BMS] No data packet in response");
+    uint8_t byteCount = res.data[0];
+    if (res.dataLen < 1 + byteCount) {
+        Serial.printf("[BMS] Short response: %d bytes, expected %d\n",
+                      (int)res.dataLen, byteCount + 1);
         return data;
     }
 
-    if (!parseDataPacket(res.dataPacket, data)) {
-        Serial.println("[BMS] Failed to parse data packet");
+    if (!parseRegisters(&res.data[1], byteCount, data)) {
+        Serial.println("[BMS] Failed to parse registers");
         return data;
     }
 
@@ -63,45 +68,54 @@ BMSData readBmsStatus(HardwareSerial& port) {
 // Internal helpers
 // ═════════════════════════════════════════════════════════════════
 
-/// Read little-endian uint16 from buffer
-static inline uint16_t readU16LE(const uint8_t* p) {
-    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+/// Read big-endian uint16 (standard Modbus register order)
+static inline uint16_t readU16BE(const uint8_t* p) {
+    return ((uint16_t)p[0] << 8) | (uint16_t)p[1];
 }
 
-/// Read little-endian uint32 from buffer
-static inline uint32_t readU32LE(const uint8_t* p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+/// Read big-endian uint32 (two consecutive Modbus registers, high word first)
+static inline uint32_t readU32BE(const uint8_t* p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
-/// Read little-endian int32 from buffer
-static inline int32_t readI32LE(const uint8_t* p) {
-    return (int32_t)readU32LE(p);
+/// Read big-endian int32
+static inline int32_t readI32BE(const uint8_t* p) {
+    return (int32_t)readU32BE(p);
 }
 
-static bool parseDataPacket(const uint8_t* pkt, BMSData& out) {
-    // Verify header: 55 AA EB 90
-    if (memcmp(pkt, JK_HEADER, sizeof(JK_HEADER)) != 0) {
+/// Parse Modbus register data starting from register 0x1290 (doc offset 144).
+///
+/// JK-BMS uses byte-level addressing: register address = 0x1200 +
+/// doc_byte_offset. But Modbus returns 2 bytes per register, so 32 registers =
+/// 64 bytes. Byte offset in response = doc_offset - 144 (start doc offset).
+///
+///   doc 144 (byte  0) — BatVol, UINT32, mV                     [reg 0x1290]
+///   doc 148 (byte  4) — BatWatt, UINT32, mW                    [reg 0x1294]
+///   doc 152 (byte  8) — BatCurrent, INT32, mA                  [reg 0x1298]
+///   doc 156 (byte 12) — TempBat1, INT16, 0.1℃                  [reg 0x129C]
+///   doc 158 (byte 14) — TempBat2, INT16, 0.1℃                  [reg 0x129E]
+///   doc 160 (byte 16) — Alarm, UINT32                          [reg 0x12A0]
+///   doc 164 (byte 20) — BalanCurrent, INT16, mA                [reg 0x12A4]
+///   doc 166 (byte 22) — BalanSta(U8) + SOC(U8) %               [reg 0x12A6]
+///   doc 167 → SOC at byte 23
+///   doc 168 (byte 24) — SOCCapRemain, INT32, mAH               [reg 0x12A8]
+///   doc 172 (byte 28) — SOCFullChargeCap, UINT32, mAH          [reg 0x12AC]
+static bool parseRegisters(const uint8_t *d, size_t len, BMSData &out) {
+    if (len < 32) {
+        Serial.printf("[BMS] Register data too short: %d bytes\n", (int)len);
         return false;
     }
 
-    // Cell voltages start at offset 6, each 2 bytes LE (mV)
-    // 8 cells for JK-B2A8S20P
-    out.cellCount = 8;
-    for (uint8_t i = 0; i < out.cellCount; i++) {
-        out.cellVoltage[i] = readU16LE(&pkt[6 + i * 2]);
-    }
+    out.power = readU32BE(&d[4]);       // doc 148: BatWatt (mW)
+    out.current = readI32BE(&d[8]);     // doc 152: BatCurrent (mA)
+    out.soc = d[23];                    // doc 167: SOC (%)
+    out.capRemain = readU32BE(&d[24]);  // doc 168: SOCCapRemain (mAH)
+    out.capNominal = readU32BE(&d[28]); // doc 172: SOCFullChargeCap (mAH)
 
-    // Offsets from JK-BMS register map documentation.
-    // Doc offsets start from data area; packet has 6-byte header (55 AA EB 90 XX XX),
-    // so actual packet offset = doc_offset + 6.
-    out.power        = readU32LE(&pkt[148 + 6]);  // doc[148] mW
-    out.current      = readI32LE(&pkt[152 + 6]);  // doc[152] mA, signed
-    out.soc          = pkt[167 + 6];                // doc[167] %
-    out.capRemain    = readU32LE(&pkt[168 + 6]);  // doc[168] mAh
-    out.capNominal   = readU32LE(&pkt[172 + 6]);  // doc[172] mAh
-    out.chargeMOS    = pkt[192 + 6] == 1;           // doc[192]
-    out.dischargeMOS = pkt[193 + 6] == 1;           // doc[193]
+    // Charge/Discharge MOS at reg 0x12C0 — outside our range, stub
+    out.chargeMOS = false;
+    out.dischargeMOS = false;
 
     return true;
 }
