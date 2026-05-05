@@ -6,8 +6,9 @@ struct BMSData {
     uint32_t timestamp;       // millis() of last successful read
 
     // Pack
-    int32_t  current;         // mA, signed (negative = discharging), ток батареи, Current
+    uint32_t voltage;         // mV, напряжение батареи, Battery Voltage
     uint32_t power;           // mW, мощность, передаваемая в/из батареи, Battery Power
+    int32_t  current;         // mA, signed (negative = discharging), ток батареи, Current
     uint8_t  soc;             // %, процент заряда аккумулятора, State of Charge
     uint32_t capRemain;       // mAh, ёмкость оставшаяся, SOC Capacity Remain
     uint32_t capNominal;      // mAh, ёмкость полная, SOC Full Charge Capacity

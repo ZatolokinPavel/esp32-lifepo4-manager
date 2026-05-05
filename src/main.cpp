@@ -83,12 +83,12 @@ void handleStatus() {
 
     char json[512];
     snprintf(json, sizeof(json),
-        "{\"bms\":{\"online\":%s,\"soc\":%u,\"current\":%d,\"power\":%u,"
+        "{\"bms\":{\"online\":%s,\"soc\":%u,\"voltage\":%u,\"current\":%d,\"power\":%u,"
         "\"cap_remain\":%u,\"cap_nominal\":%u,"
         "\"charge_mos\":%s,\"discharge_mos\":%s},"
         "\"inverter\":{\"online\":%s,\"voltage_in\":%.1f,\"voltage_out\":%.1f,\"load\":%.1f}}",
         b.online ? "true" : "false",
-        b.soc, b.current, b.power,
+        b.soc, b.voltage, b.current, b.power,
         b.capRemain, b.capNominal,
         b.chargeMOS ? "true" : "false",
         b.dischargeMOS ? "true" : "false",

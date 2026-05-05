@@ -18,7 +18,10 @@ static constexpr uint8_t BMS_ADDRESS = 4;
 // Doc offset 0x00AC (172) SOCFullChargeCap → reg 0x12AC
 // Doc offset 0x00C0 (192) Charge+Discharge → reg 0x12C0
 //
-// We read from 0x1290 to 0x12B0 (not inclusive) = 0x20 (32) registers.
+// We read from 0x1290 to 0x12C2 (not inclusive) = 0x32 (50) registers = 100 bytes.
+static constexpr uint16_t REG_START = 0x1290;
+static constexpr uint16_t REG_COUNT = 0x12C2 - 0x1290;  // 50 registers
+static constexpr size_t   REG_PAYLOAD_BYTES = REG_COUNT * 2;  // 100 bytes
 
 // ── Public API ───────────────────────────────────────────────────
 
@@ -29,8 +32,8 @@ BMSData readBmsStatus(HardwareSerial& port) {
     // Modbus function 0x03 — Read Holding Registers
     // Data: [start_reg_hi, start_reg_lo, count_hi, count_lo]
     uint8_t request[] = {
-        0x12, 0x90, // starting address
-        0x00, 0x20  // quantity of registers 32 = 0x20 = 0x12B0 - 0x1290
+        (uint8_t)(REG_START >> 8), (uint8_t)(REG_START & 0xFF),  // starting address
+        (uint8_t)(REG_COUNT >> 8), (uint8_t)(REG_COUNT & 0xFF),  // quantity of registers
     };
 
     RS485Result res =
@@ -101,21 +104,24 @@ static inline int32_t readI32BE(const uint8_t* p) {
 ///   doc 167 → SOC at byte 23
 ///   doc 168 (byte 24) — SOCCapRemain, INT32, mAH               [reg 0x12A8]
 ///   doc 172 (byte 28) — SOCFullChargeCap, UINT32, mAH          [reg 0x12AC]
+///   doc 192 (byte 48) — ChargeMOS (U8)                         [reg 0x12C0, byte 0]
+///   doc 193 (byte 49) — DischargeMOS (U8)                      [reg 0x12C0, byte 1]
 static bool parseRegisters(const uint8_t *d, size_t len, BMSData &out) {
-    if (len < 32) {
-        Serial.printf("[BMS] Register data too short: %d bytes\n", (int)len);
+    if (len < REG_PAYLOAD_BYTES) {
+        Serial.printf("[BMS] Register data too short: %d bytes, expected %d\n",
+                      (int)len, (int)REG_PAYLOAD_BYTES);
         return false;
     }
 
+    out.voltage = readU32BE(&d[0]);     // doc 144: BatVol (mV)
     out.power = readU32BE(&d[4]);       // doc 148: BatWatt (mW)
     out.current = readI32BE(&d[8]);     // doc 152: BatCurrent (mA)
     out.soc = d[23];                    // doc 167: SOC (%)
     out.capRemain = readU32BE(&d[24]);  // doc 168: SOCCapRemain (mAH)
     out.capNominal = readU32BE(&d[28]); // doc 172: SOCFullChargeCap (mAH)
 
-    // Charge/Discharge MOS at reg 0x12C0 — outside our range, stub
-    out.chargeMOS = false;
-    out.dischargeMOS = false;
+    out.chargeMOS = d[48] != 0;         // doc 192: ChargeMOS status
+    out.dischargeMOS = d[49] != 0;      // doc 193: DischargeMOS status
 
     return true;
 }
