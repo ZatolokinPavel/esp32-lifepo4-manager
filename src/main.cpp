@@ -1,8 +1,10 @@
 #include <Arduino.h>
 #include <ETH.h>
+#include <Network.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include <esp_bt.h>
 #include "bms.h"
 
 // ── Pin Definitions ──────────────────────────────────────────────
@@ -43,7 +45,7 @@ HardwareSerial SerialINV(2);   // UART2
 // ── Ethernet ─────────────────────────────────────────────────────
 static bool ethConnected = false;
 
-void onEthEvent(WiFiEvent_t event) {
+void onEthEvent(arduino_event_id_t event) {
     switch (event) {
         case ARDUINO_EVENT_ETH_START:
             Serial.println("[ETH] Started");
@@ -198,7 +200,7 @@ void setup() {
 
     // Disable WiFi & Bluetooth completely
     WiFi.mode(WIFI_OFF);
-    btStop();
+    esp_bt_controller_disable();
     Serial.println("[BOOT] WiFi & Bluetooth disabled");
 
     // OTA protection pin (external 10k pull-up, no internal pull available on GPIO35)
@@ -213,8 +215,11 @@ void setup() {
     // Shared data mutex
     dataMutex = xSemaphoreCreateMutex();
 
-    // Ethernet
-    WiFi.onEvent(onEthEvent);
+    // Ethernet — force 10 Mbps to reduce power consumption
+    Network.onEvent(onEthEvent);
+    ETH.setAutoNegotiation(false);
+    ETH.setLinkSpeed(10);
+    ETH.setFullDuplex(true);
     ETH.begin();
 
     // HTTP server
