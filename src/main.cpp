@@ -212,7 +212,7 @@ void setup() {
     pinMode(PIN_OTA_PROTECT, INPUT);
 
     // RS485 UARTs
-    SerialBMS.begin(9600, SERIAL_8N1, PIN_BMS_RX, PIN_BMS_TX);
+    SerialBMS.begin(115200, SERIAL_8N1, PIN_BMS_RX, PIN_BMS_TX);
     Serial.println("[UART1] BMS ready (GPIO5 RX, GPIO17 TX)");
     SerialINV.begin(9600, SERIAL_8N1, PIN_INV_RX, PIN_INV_TX);
     Serial.println("[UART2] Inverter ready (GPIO32 RX, GPIO33 TX)");

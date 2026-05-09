@@ -14,6 +14,7 @@ This project provides a monitoring and control solution for the **MUST PV18-3224
 * **Interface:** TTL-to-RS485 modules
 
 ### Initial installation of dependencies:
+`brew install xz`  
 Install python: `sudo apt-get install python` or `brew install python`  
 `brew install pipx`  
 Install PlatformIO: `pipx install platformio`  
@@ -26,7 +27,11 @@ Debug via UART: `pio device monitor`
 
 ## Protocols
 
-#### JK-BMS (RS485 Modbus)
+### JK-BMS
+
+Connection via UART through an RS485 adapter. Protocol: Modbus. Baud rate: 115200 or 9600.  
+In BMS settings, set "UART1 Protocol No." to `001 - JK BMS RS485 Modbus V1.0` for 115200 bps, or `013 - (9600)JK BMS RS485 Modbus V1.0` for 9600 bps.  
+**Warning:** The UART port Vcc voltage equals the full battery voltage.
 
 Register map: [JK-BMS RS485 Modbus V1.1 Register Map](protocols/BMS%20RS485%20Modbus%20V1.1%20Register%20Map%20(for%20PB2A16S20P).pdf) (for PB2A16S20P) — source: [esphome-jk-bms/docs](https://github.com/syssi/esphome-jk-bms/tree/main/docs/pb2a16s20p)
 
