@@ -156,6 +156,9 @@ void stopOTA() {
 // Task 1: RS485 polling (runs on core 0)
 // ═════════════════════════════════════════════════════════════════
 
+// Состояние управления балансировкой
+static BalancingState balancingState = {};
+
 void pollBMS() {
     BMSData bms = readBmsStatus(SerialBMS);
 
@@ -165,6 +168,8 @@ void pollBMS() {
 
     if (bms.online) {
         Serial.printf("[BMS] SOC=%u%% I=%dmA P=%umW\n", bms.soc, bms.current, bms.power);
+        // Управление балансировкой после каждого успешного чтения статуса
+        balancingManagement(bms, balancingState, SerialBMS);
     }
 }
 

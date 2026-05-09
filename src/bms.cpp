@@ -67,6 +67,79 @@ BMSData readBmsStatus(HardwareSerial& port) {
     return data;
 }
 
+bool toggleBmsControl(HardwareSerial& port, BMSControl control, bool enable) {
+    uint16_t reg;
+    switch (control) {
+        case BMSControl::Charge:    reg = 0x1070; break;
+        case BMSControl::Discharge: reg = 0x1074; break;
+        case BMSControl::Balance:   reg = 0x1078; break;
+        default: return false;
+    }
+
+    uint8_t val = enable ? 1 : 0;
+
+    // Function 0x10 — Write Multiple Registers
+    // Data: [reg_hi, reg_lo, qty_hi, qty_lo, byte_count, data...]
+    uint8_t request[] = {
+        (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF),  // starting address
+        0x00, 0x02,                                   // quantity of registers (2)
+        0x04,                                         // byte count (4)
+        0x00, 0x00, 0x00, val                         // register values
+    };
+
+    RS485Result res = modbus_message(port, BMS_ADDRESS, 0x10, request, sizeof(request));
+
+    if (!res.ok()) {
+        Serial.printf("[BMS] Toggle 0x%04X %s failed: error %d\n",
+                      reg, enable ? "ON" : "OFF", (int)res.error);
+        return false;
+    }
+
+    Serial.printf("[BMS] 0x%04X %s — OK\n", reg, enable ? "ON" : "OFF");
+    return true;
+}
+
+// ── Пороги балансировки (мА) ─────────────────────────────────────
+// Гистерезис: включаем при < 2000, выключаем при > 2500
+static constexpr int32_t BALANCE_ON_CURRENT_MAX  = 2000;   // мА — включить если ток ниже
+static constexpr int32_t BALANCE_OFF_CURRENT_MIN = 2500;   // мА — выключить если ток выше
+
+// ── Управление балансировкой ─────────────────────────────────────
+
+void balancingManagement(const BMSData& bms, BalancingState& state,
+                         HardwareSerial& port) {
+    if (!bms.online) return;
+
+    int32_t current = bms.current;  // мА, отрицательный = разряд
+    uint8_t soc     = bms.soc;
+
+    // allowed != false  →  (allowed == Yes || allowed == Unknown)
+    // Ток разрядный — выключить балансировку
+    if (state.allowed != BalanceAllowed::No && current < 0) {
+        if (toggleBmsControl(port, BMSControl::Balance, false)) {
+            state.allowed = BalanceAllowed::No;
+        }
+        return;
+    }
+
+    // Зарядный ток слишком большой — выключить балансировку
+    if (state.allowed != BalanceAllowed::No && current > BALANCE_OFF_CURRENT_MIN) {
+        if (toggleBmsControl(port, BMSControl::Balance, false)) {
+            state.allowed = BalanceAllowed::No;
+        }
+        return;
+    }
+
+    // allowed /= true  →  (allowed == No || allowed == Unknown)
+    // SOC == 100% и ток маленький — включить балансировку
+    if (state.allowed != BalanceAllowed::Yes && current >= 0 && current < BALANCE_ON_CURRENT_MAX && soc == 100) {
+        if (toggleBmsControl(port, BMSControl::Balance, true)) {
+            state.allowed = BalanceAllowed::Yes;
+        }
+        return;
+    }
+}
+
 // ═════════════════════════════════════════════════════════════════
 // Internal helpers
 // ═════════════════════════════════════════════════════════════════
