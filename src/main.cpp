@@ -215,11 +215,8 @@ void setup() {
     // Shared data mutex
     dataMutex = xSemaphoreCreateMutex();
 
-    // Ethernet — force 10 Mbps to reduce power consumption
+    // Ethernet
     Network.onEvent(onEthEvent);
-    ETH.setAutoNegotiation(false);
-    ETH.setLinkSpeed(10);
-    ETH.setFullDuplex(true);
     ETH.begin();
 
     // HTTP server
