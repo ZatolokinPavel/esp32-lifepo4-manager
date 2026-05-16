@@ -79,7 +79,7 @@ The BMS responds with a 300-byte data array followed by a standard Modbus write 
 
 **Modifying BMS parameters:**
 
-Parameters are written using standard Modbus Write Multiple Registers (function `0x10`). The register address is `base + offset` as described above. All RW registers in the [register map](protocols/BMS%20RS485%20Modbus%20V1.1%20Register%20Map%20(for%20PB2A16S20P).pdf) can be modified this way. No authentication is required.
+Parameters are written using standard Modbus "Write Multiple Registers" function `0x10`. The register address is `base + offset` as described above. All RW registers in the [register map](protocols/BMS%20RS485%20Modbus%20V1.1%20Register%20Map%20(for%20PB2A16S20P).pdf) can be modified this way. No authentication is required.
 
 Example — enable balancing (BalanEN at `0x1078`, UINT32, value `1`):
 ```
@@ -205,3 +205,89 @@ The BMS password is stored in plaintext at register `0x1470` (area `0x1400`, off
 Example — set password to "123456":  
 `04 10 14 70 00 06 0C 31 32 33 34 35 36 00 00 00 00 00 00 [CRC_Lo] [CRC_Hi]`  
 The password is a UI-level lock only — the BMS does not require authentication for register writes over RS485. Any device on the bus can read/write settings directly via standard Modbus commands.
+
+
+### MUST PV18-3224 VPM II Inverter
+
+Connection via RS485 port. Protocol: Modbus. Baud rate: 19200.
+
+Communication protocol: [MUST RS485 Modbus RTU communication protocol 1.4.15](protocols/MUST%20RS485%20Modbus%20RTU%20communication%20protocol%201.4.15.md)
+
+**Reading inverter status:**
+
+Reading inverter status uses the standard Modbus "Read Holding Registers" function `0x03` according to the [communication protocol](protocols/MUST%20RS485%20Modbus%20RTU%20communication%20protocol%201.4.15.md).
+
+<details>
+<summary>To retrieve all data from the inverter, the SolarPowerMonitor program periodically executes the following requests in the specified order</summary>
+
+```
+04 03 27 77 00 0A  7F 36  
+04 03 3B 61 00 15  D8 AA  
+04 03 4E 20 00 11  93 71  
+04 03 4E 85 00 2B  03 41  
+04 03 62 71 00 4F  4B C8  
+
+04 03 3B 61 00 15  D8 AA  
+04 03 62 71 00 4F  4B C8  
+
+04 03 3B 61 00 15  D8 AA  
+04 03 62 71 00 4F  4B C8  
+
+04 03 3B 61 00 15  D8 AA  
+04 03 62 71 00 4F  4B C8  
+```
+
+</details>
+
+<br>
+
+**Modifying inverter parameters:**
+
+Setting a single parameter uses the standard Modbus "Write Multiple Registers" function `0x10`. All RW registers in the [communication protocol](protocols/MUST%20RS485%20Modbus%20RTU%20communication%20protocol%201.4.15.md) can be modified this way.  
+> Values outside the allowed range are accepted without error but silently ignored (not applied).
+
+Example — set "Max utility charging current" (Prg 13) = 34 A:
+```
+Request:  04 10 4E 9D 00 01 02 01 54 [CRC_Lo] [CRC_Hi]
+Response: 04 10 4E 9D 00 01 [CRC_Lo] [CRC_Hi]
+```
+
+**Setting Programs ↔ Register mapping:**  
+The inverter has 41 "Setting Programs" (numbered 01–41 on the LCD panel). Most programs correspond to a single RW register in the [communication protocol](protocols/MUST%20RS485%20Modbus%20RTU%20communication%20protocol%201.4.15.md), while some only toggle an individual bit within a register (e.g. the "System setting" register `0x4EAE`).
+
+| Prg | Register | Description |
+|-----|----------|-------------|
+| 01  |          |             |
+| 02  |          |             |
+| 03  |  0x4E86  | Output voltage |
+| 04  |  0x4E87  | Output frequency |
+| 05  |          |             |
+| 06  |          |             |
+| 07  |          |             |
+| 08  |          |             |
+| 10  |          |             |
+| 11  |          |             |
+| 13  |  0x4E9D  | Max utility charging current |
+| 14  |          |             |
+| 17  |          |             |
+| 18  |          |             |
+| 19  |          |             |
+| 20  |          |             |
+| 21  |          |             |
+| 22  |          |             |
+| 23  |          |             |
+| 24  |          |             |
+| 25  |          |             |
+| 27  |          |             |
+| 28  |          |             |
+| 30  |          |             |
+| 31  |          |             |
+| 33  |          |             |
+| 34  |          |             |
+| 35  |          |             |
+| 36  |          |             |
+| 37  |          |             |
+| 38  |          |             |
+| 39  |          |             |
+| 40  |          |             |
+| 41  |          |             |
