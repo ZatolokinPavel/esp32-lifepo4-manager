@@ -241,6 +241,37 @@ Reading inverter status uses the standard Modbus "Read Holding Registers" functi
 
 <br>
 
+<details>
+<summary>Read timing measurements</summary>
+
+When you need data from two separate register regions, is it faster to read one large block or make two smaller requests? Measured using Modbus function `0x03` (Read Holding Registers) at 19200 baud.
+
+**Per-transaction overhead (fixed):**
+
+| Phase | Time |
+|-------|------|
+| Request frame (master-dependent) | 4.52 ms |
+| Slave response delay | 94.8 ms |
+| Response header | 3.71 ms |
+| Response CRC | 1.75 ms |
+| **Total overhead** | **~105 ms** |
+
+**Response body (empirical):**
+
+| Payload | Time |
+|---------|------|
+| 2 bytes (1 register) | 2.46 ms |
+| 20 bytes (10 registers) | 25.04 ms |
+| 158 bytes (79 registers) | 197.47 ms |
+
+Average inter-byte gap: ~0.77 ms. Effective per-byte cost (transmission + gap): ~1.25 ms/byte.
+
+Each additional request costs ~105 ms of fixed overhead. Two smaller reads are worthwhile when they skip more than ~84 bytes (42 registers) of unwanted data compared to a single large read. However, the CPU load that multiple requests impose on the inverter's processor is unknown.
+
+</details>
+
+<br>
+
 **Modifying inverter parameters:**
 
 Setting a single parameter uses the standard Modbus "Write Multiple Registers" function `0x10`. All RW registers in the [communication protocol](protocols/MUST%20RS485%20Modbus%20RTU%20communication%20protocol%201.4.15.md) can be modified this way.  
