@@ -1,11 +1,11 @@
 #include "bms.h"
 #include "rs485.h"
 
+// JK-BMS RS485 address (configured in BMS settings "Device Addr.")
+static constexpr uint8_t BMS_ADDRESS = 4;
+
 // Forward declarations
 static bool parseRegisters(const uint8_t* payload, size_t len, BMSData& out);
-
-// JK-BMS RS485 address
-static constexpr uint8_t BMS_ADDRESS = 4;
 
 // Read Holding Registers from block 0x1200.
 // Modbus register address = 0x1200 + doc_hex_offset.

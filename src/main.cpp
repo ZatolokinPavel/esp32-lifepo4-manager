@@ -6,6 +6,7 @@
 #include <ArduinoOTA.h>
 #include <esp_bt.h>
 #include "bms.h"
+#include "inverter.h"
 
 // ── Pin Definitions ──────────────────────────────────────────────
 // OTA protection switch on GPIO35 (input-only pin).
@@ -24,15 +25,8 @@ static constexpr uint8_t PIN_INV_RX  = 32;
 
 // ── Shared data (аналог ets) ─────────────────────────────────────
 struct DeviceData {
-    // BMS
-    BMSData  bms;
-
-    // Inverter
-    float    invVoltageIn;
-    float    invVoltageOut;
-    float    invLoadPercent;
-    bool     invOnline;
-    uint32_t lastInvUpdate;
+    BMSData      bms;
+    InverterData inverter;
 };
 
 static DeviceData   deviceData = {};
@@ -82,20 +76,24 @@ void handleStatus() {
     xSemaphoreGive(dataMutex);
 
     const BMSData& b = snapshot.bms;
+    const InverterData& inv = snapshot.inverter;
 
     char json[512];
     snprintf(json, sizeof(json),
         "{\"bms\":{\"online\":%s,\"soc\":%u,\"voltage\":%u,\"current\":%d,\"power\":%u,"
         "\"cap_remain\":%u,\"cap_nominal\":%u,"
         "\"charge_mos\":%s,\"discharge_mos\":%s},"
-        "\"inverter\":{\"online\":%s,\"voltage_in\":%.1f,\"voltage_out\":%.1f,\"load\":%.1f}}",
+        "\"inverter\":{\"online\":%s,\"grid_voltage\":%.1f,\"p_load\":%u,\"s_load\":%u,\"load_percent\":%u}}",
         b.online ? "true" : "false",
         b.soc, b.voltage, b.current, b.power,
         b.capRemain, b.capNominal,
         b.chargeMOS ? "true" : "false",
         b.dischargeMOS ? "true" : "false",
-        snapshot.invOnline ? "true" : "false",
-        snapshot.invVoltageIn, snapshot.invVoltageOut, snapshot.invLoadPercent);
+        inv.online ? "true" : "false",
+        inv.gridVoltage / 10.0,
+        inv.pLoad,
+        inv.sLoad,
+        inv.loadPercent);
 
     server.send(200, "application/json", json);
 }
@@ -174,14 +172,10 @@ void pollBMS() {
 }
 
 void pollInverter() {
-    // TODO: send actual Modbus request and parse response
-    // For now — stub with dummy data
+    InverterData inv = readInverterStatus(SerialINV);
+
     xSemaphoreTake(dataMutex, portMAX_DELAY);
-    deviceData.invVoltageIn  = 230.5;
-    deviceData.invVoltageOut = 220.1;
-    deviceData.invLoadPercent = 42.0;
-    deviceData.invOnline     = false;
-    deviceData.lastInvUpdate = millis();
+    deviceData.inverter = inv;
     xSemaphoreGive(dataMutex);
 }
 
@@ -214,7 +208,7 @@ void setup() {
     // RS485 UARTs
     SerialBMS.begin(115200, SERIAL_8N1, PIN_BMS_RX, PIN_BMS_TX);
     Serial.println("[UART1] BMS ready (GPIO5 RX, GPIO17 TX)");
-    SerialINV.begin(9600, SERIAL_8N1, PIN_INV_RX, PIN_INV_TX);
+    SerialINV.begin(19200, SERIAL_8N1, PIN_INV_RX, PIN_INV_TX);
     Serial.println("[UART2] Inverter ready (GPIO32 RX, GPIO33 TX)");
 
     // Shared data mutex

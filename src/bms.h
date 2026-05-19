@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
+/// Data read from JK-B2A8S20P BMS via Modbus RTU.
 struct BMSData {
     bool     online;
     uint32_t timestamp;       // millis() of last successful read
