@@ -297,11 +297,11 @@ The inverter has 41 "Setting Programs" (numbered 01–41 on the LCD panel). Most
 | 07  |          |             |
 | 08  |          |             |
 | 10  |          |             |
-| 11  |          |             |
+| 11  |  0x4EA4  | Max Combine charger current |
 | 13  |  0x4E9D  | Max utility charging current |
 | 14  |          |             |
-| 17  |          |             |
-| 18  |          |             |
+| 17  |  0x2778  | Absorption charging voltage |
+| 18  |  0x2777  | Floating charging voltage |
 | 19  |          |             |
 | 20  |          |             |
 | 21  |          |             |
@@ -312,9 +312,9 @@ The inverter has 41 "Setting Programs" (numbered 01–41 on the LCD panel). Most
 | 27  |          |             |
 | 28  |          |             |
 | 30  |          |             |
-| 31  |          |             |
-| 33  |          |             |
-| 34  |          |             |
+| 31  |  0x2787  | Battery Equalization voltage |
+| 33  |  0x2789  | Battery equalized time |
+| 34  |  0x278A  | Battery Equalized timeout |
 | 35  |          |             |
 | 36  |          |             |
 | 37  |          |             |
