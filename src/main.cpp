@@ -157,6 +157,10 @@ void stopOTA() {
 // Состояние управления балансировкой
 static BalancingState balancingState = {};
 
+// Состояние управления зарядом инвертора
+static ChargeConfig chargeConfig = {};
+static ChargeState  chargeState  = {};
+
 void pollBMS() {
     BMSData bms = readBmsStatus(SerialBMS);
 
@@ -176,7 +180,13 @@ void pollInverter() {
 
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     deviceData.inverter = inv;
+    BMSData bmsSnapshot = deviceData.bms;
     xSemaphoreGive(dataMutex);
+
+    if (inv.online && bmsSnapshot.online) {
+        // Управление зарядным током после каждого успешного чтения инвертора
+        chargeManagement(bmsSnapshot.soc, chargeConfig, chargeState, SerialINV);
+    }
 }
 
 void rs485Task(void* param) {
@@ -210,6 +220,9 @@ void setup() {
     Serial.println("[UART1] BMS ready (GPIO5 RX, GPIO17 TX)");
     SerialINV.begin(19200, SERIAL_8N1, PIN_INV_RX, PIN_INV_TX);
     Serial.println("[UART2] Inverter ready (GPIO32 RX, GPIO33 TX)");
+
+    // Загрузка конфигурации заряда из NVS
+    chargeConfig = loadChargeConfig();
 
     // Shared data mutex
     dataMutex = xSemaphoreCreateMutex();
