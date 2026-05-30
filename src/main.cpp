@@ -83,27 +83,36 @@ WebServer server(80);
 void handleStatus() {
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     DeviceData snapshot = deviceData;
+    ChargeConfig cfg = chargeConfig;
     xSemaphoreGive(dataMutex);
 
-    const BMSData& b = snapshot.bms;
+    const BMSData& bms = snapshot.bms;
     const InverterData& inv = snapshot.inverter;
 
-    char json[512];
-    snprintf(json, sizeof(json),
-        "{\"bms\":{\"online\":%s,\"soc\":%u,\"voltage\":%u,\"current\":%d,\"power\":%u,"
-        "\"cap_remain\":%u,\"cap_nominal\":%u,"
-        "\"charge_mos\":%s,\"discharge_mos\":%s},"
-        "\"inverter\":{\"online\":%s,\"grid_voltage\":%.1f,\"p_load\":%u,\"s_load\":%u,\"load_percent\":%u}}",
-        b.online ? "true" : "false",
-        b.soc, b.voltage, b.current, b.power,
-        b.capRemain, b.capNominal,
-        b.chargeMOS ? "true" : "false",
-        b.dischargeMOS ? "true" : "false",
+    char json[600];
+    snprintf(json, sizeof(json), "{"
+        "\"bms\":{"
+            "\"online\":%s,\"soc\":%u,\"voltage\":%u,\"current\":%d,\"power\":%u,"
+            "\"cap_remain\":%u,\"cap_nominal\":%u,\"charge_mos\":%s,\"discharge_mos\":%s"
+        "},"
+        "\"inverter\":{"
+            "\"online\":%s,\"grid_voltage\":%.1f,\"p_load\":%u,\"s_load\":%u,\"load_percent\":%u"
+        "},"
+        "\"settings\":{"
+            "\"charge_strategy\":\"%s\",\"grid_charge_current\":%u"
+        "}}",
+        bms.online ? "true" : "false",
+        bms.soc, bms.voltage, bms.current, bms.power,
+        bms.capRemain, bms.capNominal,
+        bms.chargeMOS ? "true" : "false",
+        bms.dischargeMOS ? "true" : "false",
         inv.online ? "true" : "false",
         inv.gridVoltage / 10.0,
         inv.pLoad,
         inv.sLoad,
-        inv.loadPercent);
+        inv.loadPercent,
+        cfg.strategy == ChargeStrategy::Full ? "full" : "daily",
+        cfg.gridCurrent);
 
     server.send(200, "application/json", json);
 }
