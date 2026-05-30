@@ -19,18 +19,18 @@ InverterData readInverterStatus(HardwareSerial& port);
 
 // ── Управление зарядом ───────────────────────────────────────────
 
-/// Режим заряда аккумулятора:
+/// Стратегия заряда аккумулятора:
 ///   Daily — ежедневная работа 20%–90%, щадящий режим для долговечности
 ///   Full  — полный заряд 100% с балансировкой
-enum class ChargeMode : uint8_t {
+enum class ChargeStrategy : uint8_t {
     Daily = 0,
     Full  = 1
 };
 
 /// Конфигурация заряда (хранится в NVS).
 struct ChargeConfig {
-    uint8_t    maxCurrentA = 20;              // желаемый ток заряда, целые амперы (3–60)
-    ChargeMode mode        = ChargeMode::Daily; // режим работы
+    ChargeStrategy strategy    = ChargeStrategy::Daily; // стратегия заряда
+    uint8_t        gridCurrent = 26;                    // ток заряда от сети, амперы (3–60)
 };
 
 /// Состояние управления зарядом (runtime, не сохраняется).

@@ -4,6 +4,7 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include <ArduinoJson.h>
 #include <esp_bt.h>
 #include "bms.h"
 #include "inverter.h"
@@ -23,14 +24,23 @@ static constexpr uint8_t PIN_BMS_RX  = 5;   // RXD on board
 static constexpr uint8_t PIN_INV_TX  = 33;
 static constexpr uint8_t PIN_INV_RX  = 32;
 
-// ── Shared data (аналог ets) ─────────────────────────────────────
+// ── Shared data ──────────────────────────────────────────────────
+static SemaphoreHandle_t dataMutex;
+
 struct DeviceData {
     BMSData      bms;
     InverterData inverter;
 };
 
+// Текущие данные с устройств (BMS + инвертор)
 static DeviceData   deviceData = {};
-static SemaphoreHandle_t dataMutex;
+
+// Состояние управления балансировкой
+static BalancingState balancingState = {};
+
+// Состояние управления зарядом инвертора
+static ChargeConfig chargeConfig = {};
+static ChargeState  chargeState  = {};
 
 // ── UART ports for RS485 devices ─────────────────────────────────
 HardwareSerial SerialBMS(1);   // UART1
@@ -98,9 +108,75 @@ void handleStatus() {
     server.send(200, "application/json", json);
 }
 
-void handleMode() {
-    // TODO: parse body and change inverter mode
-    server.send(200, "application/json", "{\"status\":\"not_implemented\"}");
+void handleGetSettings() {
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    ChargeConfig cfg = chargeConfig;
+    xSemaphoreGive(dataMutex);
+
+    char json[128];
+    snprintf(json, sizeof(json),
+        "{\"charge_strategy\":\"%s\",\"grid_charge_current\":%u}",
+        cfg.strategy == ChargeStrategy::Full ? "full" : "daily",
+        cfg.gridCurrent);
+    server.send(200, "application/json", json);
+}
+
+void handlePostSettings() {
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, body);
+    if (err) {
+        server.send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+
+    // Берём текущую конфигурацию как базу
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    ChargeConfig cfg = chargeConfig;
+    xSemaphoreGive(dataMutex);
+
+    bool changed = false;
+
+    if (doc["charge_strategy"].is<const char*>()) {
+        const char* strategy = doc["charge_strategy"];
+        if (strcmp(strategy, "full") == 0) {
+            cfg.strategy = ChargeStrategy::Full;
+            changed = true;
+        } else if (strcmp(strategy, "daily") == 0) {
+            cfg.strategy = ChargeStrategy::Daily;
+            changed = true;
+        } else {
+            server.send(400, "application/json",
+                "{\"error\":\"invalid charge_strategy: must be \\\"daily\\\" or \\\"full\\\"\"}");
+            return;
+        }
+    }
+
+    if (doc["grid_charge_current"].is<int>()) {
+        int val = doc["grid_charge_current"];
+        if (val < 3 || val > 60) {
+            server.send(400, "application/json",
+                "{\"error\":\"invalid grid_charge_current: must be 3-60\"}");
+            return;
+        }
+        cfg.gridCurrent = (uint8_t)val;
+        changed = true;
+    }
+
+    if (!changed) {
+        server.send(400, "application/json",
+            "{\"error\":\"no valid fields provided\"}");
+        return;
+    }
+
+    // Применяем и сохраняем
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    chargeConfig = cfg;
+    chargeState.lastWrittenCurrent = 0;  // чтобы chargeManagement применил новый ток
+    xSemaphoreGive(dataMutex);
+    saveChargeConfig(cfg);
+
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
 
 void handleSystem() {
@@ -154,13 +230,6 @@ void stopOTA() {
 // Task 1: RS485 polling (runs on core 0)
 // ═════════════════════════════════════════════════════════════════
 
-// Состояние управления балансировкой
-static BalancingState balancingState = {};
-
-// Состояние управления зарядом инвертора
-static ChargeConfig chargeConfig = {};
-static ChargeState  chargeState  = {};
-
 void pollBMS() {
     BMSData bms = readBmsStatus(SerialBMS);
 
@@ -181,11 +250,12 @@ void pollInverter() {
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     deviceData.inverter = inv;
     BMSData bmsSnapshot = deviceData.bms;
+    ChargeConfig cfgSnapshot = chargeConfig;
     xSemaphoreGive(dataMutex);
 
     if (inv.online && bmsSnapshot.online) {
         // Управление зарядным током после каждого успешного чтения инвертора
-        chargeManagement(bmsSnapshot.soc, chargeConfig, chargeState, SerialINV);
+        chargeManagement(bmsSnapshot.soc, cfgSnapshot, chargeState, SerialINV);
     }
 }
 
@@ -232,10 +302,11 @@ void setup() {
     ETH.begin();
 
     // HTTP server
-    server.on("/api/v1/status", HTTP_GET, handleStatus);
-    server.on("/api/v1/mode",   HTTP_POST, handleMode);
-    server.on("/api/v1/system", HTTP_GET, handleSystem);
-    server.on("/api/v1/reboot", HTTP_POST, handleReboot);
+    server.on("/api/v1/status",   HTTP_GET,  handleStatus);
+    server.on("/api/v1/settings", HTTP_GET,  handleGetSettings);
+    server.on("/api/v1/settings", HTTP_POST, handlePostSettings);
+    server.on("/api/v1/system",   HTTP_GET,  handleSystem);
+    server.on("/api/v1/reboot",   HTTP_POST, handleReboot);
     server.onNotFound(handleNotFound);
     server.begin();
     Serial.println("[HTTP] Server started on port 80");

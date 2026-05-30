@@ -68,40 +68,40 @@ static constexpr uint16_t REG_GRID_CHARGE_CURRENT = 0x4E9D;
 // Значения по умолчанию берутся из ChargeConfig default member initializers
 
 // NVS namespace и ключи
-static constexpr const char* NVS_NAMESPACE   = "charge";
-static constexpr const char* NVS_KEY_CURRENT = "maxA";
-static constexpr const char* NVS_KEY_MODE    = "mode";
+static constexpr const char* NVS_NAMESPACE    = "charge";
+static constexpr const char* NVS_KEY_CURRENT  = "gridCur";
+static constexpr const char* NVS_KEY_STRATEGY = "strategy";
 
 ChargeConfig loadChargeConfig() {
     Preferences prefs;
     prefs.begin(NVS_NAMESPACE, true);  // read-only
 
     ChargeConfig cfg;  // default values from struct definition
-    cfg.maxCurrentA = prefs.getUChar(NVS_KEY_CURRENT, cfg.maxCurrentA);
-    cfg.mode = static_cast<ChargeMode>(prefs.getUChar(NVS_KEY_MODE, (uint8_t)cfg.mode));
+    cfg.gridCurrent = prefs.getUChar(NVS_KEY_CURRENT, cfg.gridCurrent);
+    cfg.strategy = static_cast<ChargeStrategy>(prefs.getUChar(NVS_KEY_STRATEGY, (uint8_t)cfg.strategy));
 
     prefs.end();
 
     // Валидация диапазона
-    if (cfg.maxCurrentA < 3)  cfg.maxCurrentA = 3;
-    if (cfg.maxCurrentA > 60) cfg.maxCurrentA = 60;
-    if (cfg.mode != ChargeMode::Daily && cfg.mode != ChargeMode::Full) {
-        cfg.mode = ChargeMode::Daily;
+    if (cfg.gridCurrent < 3)  cfg.gridCurrent = 3;
+    if (cfg.gridCurrent > 60) cfg.gridCurrent = 60;
+    if (cfg.strategy != ChargeStrategy::Daily && cfg.strategy != ChargeStrategy::Full) {
+        cfg.strategy = ChargeStrategy::Daily;
     }
 
-    Serial.printf("[CHG] Config loaded: %uA, mode=%s\n",
-                  cfg.maxCurrentA, cfg.mode == ChargeMode::Full ? "full" : "daily");
+    Serial.printf("[CHG] Config loaded: %uA, strategy=%s\n",
+                  cfg.gridCurrent, cfg.strategy == ChargeStrategy::Full ? "full" : "daily");
     return cfg;
 }
 
 void saveChargeConfig(const ChargeConfig& cfg) {
     Preferences prefs;
     prefs.begin(NVS_NAMESPACE, false);  // read-write
-    prefs.putUChar(NVS_KEY_CURRENT, cfg.maxCurrentA);
-    prefs.putUChar(NVS_KEY_MODE, (uint8_t)cfg.mode);
+    prefs.putUChar(NVS_KEY_CURRENT, cfg.gridCurrent);
+    prefs.putUChar(NVS_KEY_STRATEGY, (uint8_t)cfg.strategy);
     prefs.end();
-    Serial.printf("[CHG] Config saved: %uA, mode=%s\n",
-                  cfg.maxCurrentA, cfg.mode == ChargeMode::Full ? "full" : "daily");
+    Serial.printf("[CHG] Config saved: %uA, strategy=%s\n",
+                  cfg.gridCurrent, cfg.strategy == ChargeStrategy::Full ? "full" : "daily");
 }
 
 /// Записать ток заряда в регистр 0x4E9D инвертора.
@@ -155,9 +155,9 @@ void chargeManagement(uint8_t soc, const ChargeConfig& cfg,
     // Определяем целевой ток (в единицах 0.1A)
     uint16_t targetTenths;
 
-    if (cfg.mode == ChargeMode::Full) {
+    if (cfg.strategy == ChargeStrategy::Full) {
         // Полная зарядка — всегда пользовательский ток
-        targetTenths = (uint16_t)cfg.maxCurrentA * 10;
+        targetTenths = (uint16_t)cfg.gridCurrent * 10;
     } else {
         // Режим Daily: ограничиваем ток при высоком SOC
         if (soc > 92) {
@@ -165,7 +165,7 @@ void chargeManagement(uint8_t soc, const ChargeConfig& cfg,
         } else if (soc > 90) {
             targetTenths = 20;   // 2.0A — ток ожидания
         } else {
-            targetTenths = (uint16_t)cfg.maxCurrentA * 10;
+            targetTenths = (uint16_t)cfg.gridCurrent * 10;
         }
     }
 
