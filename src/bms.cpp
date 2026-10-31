@@ -110,19 +110,11 @@ void balancingManagement(const BMSData& bms, BalancingState& state,
                          HardwareSerial& port) {
     if (!bms.online) return;
 
-    int32_t current = bms.current;  // мА, отрицательный = разряд
+    int32_t current = bms.current < 0 ? -bms.current : bms.current; // мА, направление (заряд/разряд) не важно
     uint8_t soc     = bms.soc;
 
     // allowed != false  →  (allowed == Yes || allowed == Unknown)
-    // Ток разрядный — выключить балансировку
-    if (state.allowed != BalanceAllowed::No && current < 0) {
-        if (toggleBmsControl(port, BMSControl::Balance, false)) {
-            state.allowed = BalanceAllowed::No;
-        }
-        return;
-    }
-
-    // Зарядный ток слишком большой — выключить балансировку
+    // Ток (заряд или разряд) слишком большой — выключить балансировку
     if (state.allowed != BalanceAllowed::No && current > BALANCE_OFF_CURRENT_MIN) {
         if (toggleBmsControl(port, BMSControl::Balance, false)) {
             state.allowed = BalanceAllowed::No;
@@ -131,8 +123,9 @@ void balancingManagement(const BMSData& bms, BalancingState& state,
     }
 
     // allowed /= true  →  (allowed == No || allowed == Unknown)
-    // SOC == 100% и ток маленький — включить балансировку
-    if (state.allowed != BalanceAllowed::Yes && current >= 0 && current < BALANCE_ON_CURRENT_MAX && soc == 100) {
+    // SOC > 97% и ток маленький — разрешить балансировку
+    // (порог напряжения ячейки задан в BMS, сейчас ≥ 3.42 В)
+    if (state.allowed != BalanceAllowed::Yes && current < BALANCE_ON_CURRENT_MAX && soc > 97) {
         if (toggleBmsControl(port, BMSControl::Balance, true)) {
             state.allowed = BalanceAllowed::Yes;
         }
@@ -189,6 +182,11 @@ static bool parseRegisters(const uint8_t *d, size_t len, BMSData &out) {
     out.voltage = readU32BE(&d[0]);     // doc 144: BatVol (mV)
     out.power = readU32BE(&d[4]);       // doc 148: BatWatt (mW)
     out.current = readI32BE(&d[8]);     // doc 152: BatCurrent (mA)
+    switch (d[22]) {                    // doc 166: BalanSta (2 - разряд, 1 - заряд, 0 - выкл)
+        case 1:  out.balanceStatus = 1;  break;  // балансир заряжает ячейку
+        case 2:  out.balanceStatus = -1; break;  // балансир разряжает ячейку
+        default: out.balanceStatus = 0;  break;  // выкл
+    }
     out.soc = d[23];                    // doc 167: SOC (%)
     out.capRemain = readU32BE(&d[24]);  // doc 168: SOCCapRemain (mAH)
     out.capNominal = readU32BE(&d[28]); // doc 172: SOCFullChargeCap (mAH)

@@ -93,7 +93,8 @@ void handleStatus() {
     snprintf(json, sizeof(json), "{"
         "\"bms\":{"
             "\"online\":%s,\"soc\":%u,\"voltage\":%u,\"current\":%d,\"power\":%u,"
-            "\"cap_remain\":%u,\"cap_nominal\":%u,\"charge_mos\":%s,\"discharge_mos\":%s"
+            "\"cap_remain\":%u,\"cap_nominal\":%u,\"charge_mos\":%s,\"discharge_mos\":%s,"
+            "\"balance_status\":%d"
         "},"
         "\"inverter\":{"
             "\"online\":%s,\"grid_voltage\":%.1f,\"p_load\":%u,\"s_load\":%u,\"load_percent\":%u"
@@ -106,6 +107,7 @@ void handleStatus() {
         bms.capRemain, bms.capNominal,
         bms.chargeMOS ? "true" : "false",
         bms.dischargeMOS ? "true" : "false",
+        (int)bms.balanceStatus,
         inv.online ? "true" : "false",
         inv.gridVoltage / 10.0,
         inv.pLoad,

@@ -10,6 +10,7 @@ struct BMSData {
     uint32_t voltage;         // mV, напряжение батареи, Battery Voltage
     uint32_t power;           // mW, мощность, передаваемая в/из батареи, Battery Power
     int32_t  current;         // mA, signed (negative = discharging), ток батареи, Current
+    int8_t   balanceStatus;   // состояние балансира, BalanSta: 1 - заряжает ячейку; -1 - разряжает ячейку; 0 - выкл
     uint8_t  soc;             // %, процент заряда аккумулятора, State of Charge
     uint32_t capRemain;       // mAh, ёмкость оставшаяся, SOC Capacity Remain
     uint32_t capNominal;      // mAh, ёмкость полная, SOC Full Charge Capacity
@@ -43,8 +44,8 @@ bool toggleBmsControl(HardwareSerial& port, BMSControl control, bool enable);
 /// приведёт к ложной разбалансировке.
 ///
 /// Условия:
-///   Включить:  SOC == 100% && ток зарядный >= 0 && ток < 2000 мА
-///   Выключить: ток разрядный (< 0) ИЛИ ток зарядный > 2500 мА
+///   Включить:  SOC > 97% && |ток| < 2000 мА (заряд или разряд)
+///   Выключить: |ток| > 2500 мА (заряд или разряд)
 ///
 /// Гистерезис 2.0A / 2.5A предотвращает дребезг переключений.
 
