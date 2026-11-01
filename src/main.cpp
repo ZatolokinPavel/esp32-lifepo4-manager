@@ -246,12 +246,13 @@ void pollBMS() {
 
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     deviceData.bms = bms;
+    ChargeConfig cfgSnapshot = chargeConfig;
     xSemaphoreGive(dataMutex);
 
     if (bms.online) {
         Serial.printf("[BMS] SOC=%u%% I=%dmA P=%umW\n", bms.soc, bms.current, bms.power);
         // Управление балансировкой после каждого успешного чтения статуса
-        balancingManagement(bms, balancingState, SerialBMS);
+        balancingManagement(bms, cfgSnapshot, balancingState, SerialBMS);
     }
 }
 

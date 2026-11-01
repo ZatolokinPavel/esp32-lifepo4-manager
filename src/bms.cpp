@@ -106,12 +106,22 @@ static constexpr int32_t BALANCE_OFF_CURRENT_MIN = 2500;   // мА — выкл�
 
 // ── Управление балансировкой ─────────────────────────────────────
 
-void balancingManagement(const BMSData& bms, BalancingState& state,
-                         HardwareSerial& port) {
+void balancingManagement(const BMSData& bms, const ChargeConfig& cfg,
+                         BalancingState& state, HardwareSerial& port) {
     if (!bms.online) return;
 
     int32_t current = bms.current < 0 ? -bms.current : bms.current; // мА, направление (заряд/разряд) не важно
     uint8_t soc     = bms.soc;
+    bool    isDaily = cfg.strategy == ChargeStrategy::Daily;
+
+    // Стратегия Daily — балансировка не нужна, выключить явно,
+    // не дожидаясь, пока BMS сама остановит её по порогу напряжения ячейки
+    if (state.allowed != BalanceAllowed::No && isDaily) {
+        if (toggleBmsControl(port, BMSControl::Balance, false)) {
+            state.allowed = BalanceAllowed::No;
+        }
+        return;
+    }
 
     // allowed != false  →  (allowed == Yes || allowed == Unknown)
     // Ток (заряд или разряд) слишком большой — выключить балансировку
@@ -123,9 +133,9 @@ void balancingManagement(const BMSData& bms, BalancingState& state,
     }
 
     // allowed /= true  →  (allowed == No || allowed == Unknown)
-    // SOC > 97% и ток маленький — разрешить балансировку
+    // Стратегия Full, SOC > 97% и ток маленький — разрешить балансировку
     // (порог напряжения ячейки задан в BMS, сейчас ≥ 3.42 В)
-    if (state.allowed != BalanceAllowed::Yes && current < BALANCE_ON_CURRENT_MAX && soc > 97) {
+    if (state.allowed != BalanceAllowed::Yes && !isDaily && current < BALANCE_ON_CURRENT_MAX && soc > 97) {
         if (toggleBmsControl(port, BMSControl::Balance, true)) {
             state.allowed = BalanceAllowed::Yes;
         }

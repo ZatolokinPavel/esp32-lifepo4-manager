@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "inverter.h"  // ChargeConfig
 
 /// Data read from JK-B2A8S20P BMS via Modbus RTU.
 struct BMSData {
@@ -44,7 +45,8 @@ bool toggleBmsControl(HardwareSerial& port, BMSControl control, bool enable);
 /// приведёт к ложной разбалансировке.
 ///
 /// Условия:
-///   Включить:  SOC > 97% && |ток| < 2000 мА (заряд или разряд)
+///   Выключить: стратегия заряда Daily
+///   Включить:  стратегия Full && SOC > 97% && |ток| < 2000 мА (заряд или разряд)
 ///   Выключить: |ток| > 2500 мА (заряд или разряд)
 ///
 /// Гистерезис 2.0A / 2.5A предотвращает дребезг переключений.
@@ -63,8 +65,9 @@ struct BalancingState {
 
 /// Вызывается после каждого успешного чтения статуса BMS.
 /// При необходимости отправляет команду включения/выключения балансировки.
-/// @param bms      — текущие данные BMS
-/// @param state    — состояние балансировки (обновляется на месте)
-/// @param port     — UART порт для отправки команды в BMS
-void balancingManagement(const BMSData& bms, BalancingState& state,
-                         HardwareSerial& port);
+/// @param bms   — текущие данные BMS
+/// @param cfg   — конфигурация заряда (при стратегии Daily балансировка запрещена)
+/// @param state — состояние балансировки (обновляется на месте)
+/// @param port  — UART порт для отправки команды в BMS
+void balancingManagement(const BMSData& bms, const ChargeConfig& cfg,
+                         BalancingState& state, HardwareSerial& port);
