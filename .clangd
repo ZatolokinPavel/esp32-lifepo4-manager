@@ -1,0 +1,16 @@
+CompileFlags:
+  # Флаги xtensa-gcc, которые clang не понимает
+  Remove:
+    - -mlongcalls
+    - -mdisable-hardware-atomics
+    - -mfix-esp32-psram-cache-issue
+    - -mfix-esp32-psram-cache-strategy=*
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -mtext-section-literals
+    - -mno-target-align
+    - -freorder-blocks
+    - -fno-shrink-wrap
+    - -fno-jump-tables
+    - -fno-tree-*
+    - -fno-*-excess-precision
