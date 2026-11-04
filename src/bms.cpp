@@ -106,7 +106,7 @@ static constexpr int32_t BALANCE_OFF_CURRENT_MIN = 2500;   // мА — выкл�
 
 // ── Управление балансировкой ─────────────────────────────────────
 
-void balancingManagement(const BMSData& bms, const ChargeConfig& cfg,
+void balancingManagement(const BMSData& bms, const Config& cfg,
                          BalancingState& state, HardwareSerial& port) {
     if (!bms.online) return;
 

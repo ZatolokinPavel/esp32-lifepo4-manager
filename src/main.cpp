@@ -6,8 +6,11 @@
 #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <esp_bt.h>
+#include <atomic>
 #include "bms.h"
 #include "inverter.h"
+#include "config.h"
+#include "charge_control.h"
 
 // ── Pin Definitions ──────────────────────────────────────────────
 // OTA protection switch on GPIO35 (input-only pin).
@@ -38,9 +41,14 @@ static DeviceData   deviceData = {};
 // Состояние управления балансировкой
 static BalancingState balancingState = {};
 
-// Состояние управления зарядом инвертора
-static ChargeConfig chargeConfig = {};
-static ChargeState  chargeState  = {};
+// Конфигурация приложения (NVS)
+static Config config = {};
+
+// Состояние совместного управления зарядом (инвертор + BMS)
+static ChargeControlState chargeControlState = {};
+
+// Копия текущей фазы для HTTP. Один байт — atomic вместо dataMutex.
+static std::atomic<ChargePhase> chargePhase{ChargePhase::Unknown};
 
 // ── UART ports for RS485 devices ─────────────────────────────────
 HardwareSerial SerialBMS(1);   // UART1
@@ -83,8 +91,10 @@ WebServer server(80);
 void handleStatus() {
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     DeviceData snapshot = deviceData;
-    ChargeConfig cfg = chargeConfig;
+    Config cfg = config;
     xSemaphoreGive(dataMutex);
+
+    ChargePhase phase = chargePhase;
 
     const BMSData& bms = snapshot.bms;
     const InverterData& inv = snapshot.inverter;
@@ -98,6 +108,9 @@ void handleStatus() {
         "},"
         "\"inverter\":{"
             "\"online\":%s,\"grid_voltage\":%.1f,\"p_load\":%u,\"s_load\":%u,\"load_percent\":%u"
+        "},"
+        "\"charge\":{"
+            "\"phase\":\"%s\""
         "},"
         "\"settings\":{"
             "\"charge_strategy\":\"%s\",\"grid_charge_current\":%u"
@@ -113,6 +126,7 @@ void handleStatus() {
         inv.pLoad,
         inv.sLoad,
         inv.loadPercent,
+        chargePhaseName(phase),
         cfg.strategy == ChargeStrategy::Full ? "full" : "daily",
         cfg.gridCurrent);
 
@@ -121,7 +135,7 @@ void handleStatus() {
 
 void handleGetSettings() {
     xSemaphoreTake(dataMutex, portMAX_DELAY);
-    ChargeConfig cfg = chargeConfig;
+    Config cfg = config;
     xSemaphoreGive(dataMutex);
 
     char json[128];
@@ -143,7 +157,7 @@ void handlePostSettings() {
 
     // Берём текущую конфигурацию как базу
     xSemaphoreTake(dataMutex, portMAX_DELAY);
-    ChargeConfig cfg = chargeConfig;
+    Config cfg = config;
     xSemaphoreGive(dataMutex);
 
     bool changed = false;
@@ -182,10 +196,9 @@ void handlePostSettings() {
 
     // Применяем и сохраняем
     xSemaphoreTake(dataMutex, portMAX_DELAY);
-    chargeConfig = cfg;
-    chargeState.lastWrittenCurrent = 0;  // чтобы chargeManagement применил новый ток
+    config = cfg;
     xSemaphoreGive(dataMutex);
-    saveChargeConfig(cfg);
+    saveConfig(cfg);
 
     server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
@@ -246,7 +259,7 @@ void pollBMS() {
 
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     deviceData.bms = bms;
-    ChargeConfig cfgSnapshot = chargeConfig;
+    Config cfgSnapshot = config;
     xSemaphoreGive(dataMutex);
 
     if (bms.online) {
@@ -261,14 +274,21 @@ void pollInverter() {
 
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     deviceData.inverter = inv;
-    BMSData bmsSnapshot = deviceData.bms;
-    ChargeConfig cfgSnapshot = chargeConfig;
+    xSemaphoreGive(dataMutex);
+}
+
+/// Совместное управление зарядом — после опроса обоих устройств.
+void runChargeControl() {
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    DeviceData snapshot = deviceData;
+    Config cfgSnapshot = config;
     xSemaphoreGive(dataMutex);
 
-    if (inv.online && bmsSnapshot.online) {
-        // Управление зарядным током после каждого успешного чтения инвертора
-        chargeManagement(bmsSnapshot.soc, cfgSnapshot, chargeState, SerialINV);
+    if (snapshot.bms.online && snapshot.inverter.online) {
+        chargeControl(snapshot.bms, cfgSnapshot, chargeControlState, SerialBMS, SerialINV);
     }
+
+    chargePhase = chargeControlState.phase;
 }
 
 void rs485Task(void* param) {
@@ -277,6 +297,7 @@ void rs485Task(void* param) {
         pollBMS();
         delay(100);       // small gap between devices
         pollInverter();
+        runChargeControl();
         delay(1000);      // poll cycle ~1 second
     }
 }
@@ -303,8 +324,8 @@ void setup() {
     SerialINV.begin(19200, SERIAL_8N1, PIN_INV_RX, PIN_INV_TX);
     Serial.println("[UART2] Inverter ready (GPIO32 RX, GPIO33 TX)");
 
-    // Загрузка конфигурации заряда из NVS
-    chargeConfig = loadChargeConfig();
+    // Загрузка конфигурации из NVS
+    config = loadConfig();
 
     // Shared data mutex
     dataMutex = xSemaphoreCreateMutex();

@@ -1,6 +1,6 @@
 #pragma once
 #include <Arduino.h>
-#include "inverter.h"  // ChargeConfig
+#include "config.h"
 
 /// Data read from JK-B2A8S20P BMS via Modbus RTU.
 struct BMSData {
@@ -69,5 +69,5 @@ struct BalancingState {
 /// @param cfg   — конфигурация заряда (при стратегии Daily балансировка запрещена)
 /// @param state — состояние балансировки (обновляется на месте)
 /// @param port  — UART порт для отправки команды в BMS
-void balancingManagement(const BMSData& bms, const ChargeConfig& cfg,
+void balancingManagement(const BMSData& bms, const Config& cfg,
                          BalancingState& state, HardwareSerial& port);

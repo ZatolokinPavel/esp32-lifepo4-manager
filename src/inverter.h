@@ -17,39 +17,17 @@ struct InverterData {
 /// Uses modbus_message internally (address=4, function=0x03 Read Holding Registers).
 InverterData readInverterStatus(HardwareSerial& port);
 
-// ── Управление зарядом ───────────────────────────────────────────
+// ── Зарядные токи ────────────────────────────────────────────────
+// Оба регистра: единица 0.1A, диапазон 10–600 (1–60 A).
 
-/// Стратегия заряда аккумулятора:
-///   Daily — ежедневная работа 20%–90%, щадящий режим для долговечности
-///   Full  — полный заряд 100% с балансировкой
-enum class ChargeStrategy : uint8_t {
-    Daily = 0,
-    Full  = 1
-};
+/// Записать максимальный ток заряда от сети (регистр 0x4E9D).
+/// @param currentTenths — ток в единицах 0.1A (например, 200 = 20.0A)
+/// @return true если запись успешна
+bool writeGridChargeCurrent(HardwareSerial& port, uint16_t currentTenths);
 
-/// Конфигурация заряда (хранится в NVS).
-struct ChargeConfig {
-    ChargeStrategy strategy    = ChargeStrategy::Daily; // стратегия заряда
-    uint8_t        gridCurrent = 26;                    // ток заряда от сети, амперы (3–60)
-};
-
-/// Состояние управления зарядом (runtime, не сохраняется).
-struct ChargeState {
-    uint16_t lastWrittenCurrent = 0;  // последний записанный ток (0.1A), 0 = ещё не писали
-};
-
-/// Загрузить конфигурацию заряда из NVS (вызвать один раз в setup).
-ChargeConfig loadChargeConfig();
-
-/// Сохранить конфигурацию заряда в NVS.
-void saveChargeConfig(const ChargeConfig& cfg);
-
-/// Управление зарядным током инвертора.
-/// Вызывается после каждого успешного чтения данных инвертора.
-/// Записывает регистр 0x4E9D (Grid max charger current) при необходимости.
-/// @param soc    — текущий SOC батареи (%)
-/// @param cfg    — конфигурация заряда
-/// @param state  — runtime-состояние (обновляется на месте)
-/// @param port   — UART порт инвертора
-void chargeManagement(uint8_t soc, const ChargeConfig& cfg,
-                      ChargeState& state, HardwareSerial& port);
+/// Записать максимальный ток заряда от солнца (регистр 0x4EA4).
+/// В протоколе описан как "Max Combine charger current", но фактически
+/// (по бумажной инструкции и проверке) это "Max solar charging current".
+/// @param currentTenths — ток в единицах 0.1A
+/// @return true если запись успешна
+bool writeSolarChargeCurrent(HardwareSerial& port, uint16_t currentTenths);
