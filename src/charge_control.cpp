@@ -159,6 +159,11 @@ static void syncCurrents(const Config& cfg, ChargeControlState& state, HardwareS
 
 // ── Public API ───────────────────────────────────────────────────
 
+void forgetWrittenCurrents(ChargeControlState& state) {
+    state.gridWritten  = 0;
+    state.solarWritten = 0;
+}
+
 void chargeControl(const BMSData& bms, const Config& cfg, ChargeControlState& state,
                    HardwareSerial& bmsPort, HardwareSerial& invPort) {
     updatePhase(bms, cfg, state, bmsPort);

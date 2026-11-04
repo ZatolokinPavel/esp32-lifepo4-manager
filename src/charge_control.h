@@ -44,6 +44,11 @@ struct ChargeControlState {
 /// Имя фазы для логов и JSON: "unknown", "charging", "limiting", "holding".
 const char* chargePhaseName(ChargePhase phase);
 
+/// Забыть записанные в инвертор лимиты: на следующем вызове chargeControl
+/// они будут отправлены повторно, даже если цель не изменилась.
+/// Нужно, когда значения в инверторе могли поменять вручную с его панели.
+void forgetWrittenCurrents(ChargeControlState& state);
+
 /// Вызывается раз за цикл опроса, когда BMS и инвертор онлайн.
 /// @param bms     — свежие данные BMS
 /// @param cfg     — конфигурация

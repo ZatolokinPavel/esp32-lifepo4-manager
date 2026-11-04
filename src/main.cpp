@@ -50,6 +50,11 @@ static ChargeControlState chargeControlState = {};
 // Копия текущей фазы для HTTP. Один байт — atomic вместо dataMutex.
 static std::atomic<ChargePhase> chargePhase{ChargePhase::Unknown};
 
+// Запрос из HTTP: заново отправить лимиты тока в инвертор.
+// Значения в инверторе могли поменять вручную с его панели, а программа
+// помнит только то, что записала сама, и без сброса не отправит тот же ток.
+static std::atomic<bool> resendCurrents{false};
+
 // ── UART ports for RS485 devices ─────────────────────────────────
 HardwareSerial SerialBMS(1);   // UART1
 HardwareSerial SerialINV(2);   // UART2
@@ -199,6 +204,7 @@ void handlePostSettings() {
     config = cfg;
     xSemaphoreGive(dataMutex);
     saveConfig(cfg);
+    resendCurrents = true;
 
     server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
@@ -283,6 +289,10 @@ void runChargeControl() {
     DeviceData snapshot = deviceData;
     Config cfgSnapshot = config;
     xSemaphoreGive(dataMutex);
+
+    if (resendCurrents.exchange(false)) {
+        forgetWrittenCurrents(chargeControlState);
+    }
 
     if (snapshot.bms.online && snapshot.inverter.online) {
         chargeControl(snapshot.bms, cfgSnapshot, chargeControlState, SerialBMS, SerialINV);
