@@ -94,3 +94,13 @@ bool writeGridChargeCurrent(HardwareSerial& port, uint16_t currentTenths) {
 bool writeSolarChargeCurrent(HardwareSerial& port, uint16_t currentTenths) {
     return writeRegister(port, REG_SOLAR_CHARGE_CURRENT, currentTenths);
 }
+
+// ── Выход инвертора ──────────────────────────────────────────────
+
+// Inverter offgrid work enable: 0 — выход выключен без сети, 1 — включён
+static constexpr uint16_t REG_INVERTER_OUTPUT = 0x4E85;
+
+bool writeInverterOutput(HardwareSerial& port, bool enabled) {
+    uint16_t value = enabled ? 1 : 0;
+    return writeRegister(port, REG_INVERTER_OUTPUT, value);
+}

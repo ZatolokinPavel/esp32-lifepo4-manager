@@ -31,3 +31,10 @@ bool writeGridChargeCurrent(HardwareSerial& port, uint16_t currentTenths);
 /// @param currentTenths — ток в единицах 0.1A
 /// @return true если запись успешна
 bool writeSolarChargeCurrent(HardwareSerial& port, uint16_t currentTenths);
+
+// ── Выход инвертора ──────────────────────────────────────────────
+
+/// Включить/выключить выход инвертора при отсутствии сети
+/// (регистр 0x4E85 "Inverter offgrid work enable": 0 — OFF, 1 — ON).
+/// @return true если запись успешна
+bool writeInverterOutput(HardwareSerial& port, bool enabled);

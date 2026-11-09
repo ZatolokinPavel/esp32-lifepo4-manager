@@ -55,6 +55,11 @@ static std::atomic<ChargePhase> chargePhase{ChargePhase::Unknown};
 // помнит только то, что записала сама, и без сброса не отправит тот же ток.
 static std::atomic<bool> resendCurrents{false};
 
+// Запрос из HTTP: записать в инвертор config.inverterOutput (регистр 0x4E85).
+// Пишется только по запросу, периодически не синхронизируется,
+// чтобы не перебивать ручное управление с панели инвертора.
+static std::atomic<bool> writeOutputPending{false};
+
 // ── UART ports for RS485 devices ─────────────────────────────────
 HardwareSerial SerialBMS(1);   // UART1
 HardwareSerial SerialINV(2);   // UART2
@@ -104,7 +109,7 @@ void handleStatus() {
     const BMSData& bms = snapshot.bms;
     const InverterData& inv = snapshot.inverter;
 
-    char json[600];
+    char json[700];
     snprintf(json, sizeof(json), "{"
         "\"bms\":{"
             "\"online\":%s,\"soc\":%u,\"voltage\":%u,\"current\":%d,\"power\":%u,"
@@ -118,7 +123,7 @@ void handleStatus() {
             "\"phase\":\"%s\""
         "},"
         "\"settings\":{"
-            "\"charge_strategy\":\"%s\",\"grid_charge_current\":%u"
+            "\"charge_strategy\":\"%s\",\"grid_charge_current\":%u,\"inverter_output\":%s"
         "}}",
         bms.online ? "true" : "false",
         bms.soc, bms.voltage, bms.current, bms.power,
@@ -133,7 +138,8 @@ void handleStatus() {
         inv.loadPercent,
         chargePhaseName(phase),
         cfg.strategy == ChargeStrategy::Full ? "full" : "daily",
-        cfg.gridCurrent);
+        cfg.gridCurrent,
+        cfg.inverterOutput ? "true" : "false");
 
     server.send(200, "application/json", json);
 }
@@ -145,9 +151,10 @@ void handleGetSettings() {
 
     char json[128];
     snprintf(json, sizeof(json),
-        "{\"charge_strategy\":\"%s\",\"grid_charge_current\":%u}",
+        "{\"charge_strategy\":\"%s\",\"grid_charge_current\":%u,\"inverter_output\":%s}",
         cfg.strategy == ChargeStrategy::Full ? "full" : "daily",
-        cfg.gridCurrent);
+        cfg.gridCurrent,
+        cfg.inverterOutput ? "true" : "false");
     server.send(200, "application/json", json);
 }
 
@@ -193,6 +200,18 @@ void handlePostSettings() {
         changed = true;
     }
 
+    bool outputProvided = false;
+    if (!doc["inverter_output"].isNull()) {
+        if (!doc["inverter_output"].is<bool>()) {
+            server.send(400, "application/json",
+                "{\"error\":\"invalid inverter_output: must be true or false\"}");
+            return;
+        }
+        cfg.inverterOutput = doc["inverter_output"];
+        outputProvided = true;
+        changed = true;
+    }
+
     if (!changed) {
         server.send(400, "application/json",
             "{\"error\":\"no valid fields provided\"}");
@@ -205,6 +224,9 @@ void handlePostSettings() {
     xSemaphoreGive(dataMutex);
     saveConfig(cfg);
     resendCurrents = true;
+    if (outputProvided) {
+        writeOutputPending = true;
+    }
 
     server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
@@ -301,6 +323,32 @@ void runChargeControl() {
     chargePhase = chargeControlState.phase;
 }
 
+/// Записать выход инвертора, если его поменяли через HTTP.
+/// Одна попытка: при неудаче или если инвертор не на связи запрос отбрасывается,
+/// чтобы старая команда не сработала неожиданно спустя долгое время.
+///
+/// Известная проблема: handlePostSettings сохраняет значение в NVS и отвечает
+/// "ok" ещё до записи в инвертор. Если запись не удалась, в NVS (и в ответах
+/// GET /api/v1/settings и /api/v1/status) остаётся новое значение, хотя
+/// на инверторе выход остался прежним.
+void applyInverterOutput() {
+    if (!writeOutputPending.exchange(false)) {
+        return;
+    }
+
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    bool inverterOnline = deviceData.inverter.online;
+    bool outputEnabled  = config.inverterOutput;
+    xSemaphoreGive(dataMutex);
+
+    if (!inverterOnline) {
+        Serial.println("[INV] Output write skipped: inverter offline");
+        return;
+    }
+
+    writeInverterOutput(SerialINV, outputEnabled);
+}
+
 void rs485Task(void* param) {
     Serial.println("[RS485] Task started on core " + String(xPortGetCoreID()));
     for (;;) {
@@ -308,6 +356,7 @@ void rs485Task(void* param) {
         delay(100);       // small gap between devices
         pollInverter();
         runChargeControl();
+        applyInverterOutput();
         delay(1000);      // poll cycle ~1 second
     }
 }
