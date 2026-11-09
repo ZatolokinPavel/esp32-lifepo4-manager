@@ -145,29 +145,22 @@ static void updatePhase(const BMSData& bms, const Config& cfg,
 
 // ── Синхронизация лимитов инвертора ──────────────────────────────
 
-/// Не больше ОДНОЙ записи в инвертор за итерацию — это скрытая пауза ~1 с между записями.
+/// Порядок записи важен: сначала солнце (0x4EA4), потом сеть (0x4E9D).
 ///
-/// Если записать 0x4E9D и сразу за ним 0x4EA4, инвертор подтверждает обе записи,
-/// но иногда первая молча откатывается к прежнему значению. Похоже, он сохраняет
-/// настройки одним блоком, и вторая запись затирает ещё не сохранённую первую.
-/// Наблюдалось в Limiting: сеть осталась 25 A, солнце стало 1 A.
-/// Поэтому после каждой записи выходим, следующий регистр пишется в следующем цикле.
+/// При обратном порядке инвертор подтверждал обе записи, но лимит сети иногда
+/// молча оставался прежним. Наблюдалось в Limiting: сеть осталась 25 A, солнце
+/// стало 1 A, заряд продолжился до 97%. Пауза ~1 с между записями не помогла,
+/// перестановка порядка помогла. Причина неизвестна.
 static void syncCurrents(const Config& cfg, ChargeControlState& state, HardwareSerial& invPort) {
     uint16_t grid  = targetGridCurrent(cfg, state.phase);
     uint16_t solar = targetSolarCurrent(state.phase);
 
-    if (grid != 0 && grid != state.gridWritten) {
-        if (writeGridChargeCurrent(invPort, grid)) {
-            state.gridWritten = grid;
-        }
-        return;  // одна запись за итерацию, см. комментарий выше
+    if (solar != 0 && solar != state.solarWritten && writeSolarChargeCurrent(invPort, solar)) {
+        state.solarWritten = solar;
     }
 
-    if (solar != 0 && solar != state.solarWritten) {
-        if (writeSolarChargeCurrent(invPort, solar)) {
-            state.solarWritten = solar;
-        }
-        return;  // одна запись за итерацию, см. комментарий выше
+    if (grid != 0 && grid != state.gridWritten && writeGridChargeCurrent(invPort, grid)) {
+        state.gridWritten = grid;
     }
 }
 
